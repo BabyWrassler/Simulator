@@ -1,15 +1,16 @@
 // Simulator to teach kids how to dial 911 and what to expect when they do. 
 
-#include <Wire.h>
-#include <SPI.h>
+#include <Wire.h> // For i2c communications with the MCP23017 i/o expanders and the HT16K33 LED matrix driver
+#include <SPI.h> // For communication with the Rugged Audio Shield
 #include <RAS.h> // Rugged Audio Shield library
-#include "Adafruit_LEDBackpack.h"
-#include "Adafruit_GFX.h"
+#include "Adafruit_LEDBackpack.h" // For the HT16K33
+#include "Adafruit_GFX.h" // For the HT16K33
+#include <avr/wdt.h> // Watchdog Timer
 
 RAS RAS;
 Adafruit_LEDBackpack matrix = Adafruit_LEDBackpack();
 
-// HT16K33 connections C0-C7. C0 not used.
+// HT16K33 connections C1-C7. C0 not used.
 #define ASEG 5
 #define BSEG 6
 #define CSEG 3
@@ -44,9 +45,11 @@ Adafruit_LEDBackpack matrix = Adafruit_LEDBackpack();
 
 
 #define port 0x27  // MCP23017 for the keypad and script buttons is on I2C port 0x20
+#define portTWO 0x24 // MCP23017 for pound and star buttons
 #define portLED 0x26  // MCP23017 for the keypad and script LEDs is on I2C port 0x26
+#define portLEDTWO 0x20 // MCP23017 for pound and star LEDs
 
-volatile boolean keyPressed;
+volatile boolean keyPressed; // set when interrupt fires
 
 //int led = 13;
 unsigned long resetTimer = 0;
@@ -72,6 +75,8 @@ int keyBuffer = -1;
 #define EIGHTKEY 1
 #define NINEKEY 9
 #define ZEROKEY 2
+#define POUNDKEY 16
+#define STARKEY 17
 
 #define ONELED 14
 #define TWOLED 13
@@ -83,6 +88,8 @@ int keyBuffer = -1;
 #define EIGHTLED 10
 #define NINELED 6
 #define ZEROLED 11
+#define POUNDLED 6
+#define STARLED 7
 
 #define AKEY 15
 #define BKEY 8
@@ -123,12 +130,12 @@ int keyBuffer = -1;
 // Lengths of sound files
 #define TONELENGTH 200
 #define RINGLENGTH 2100
-#define SCRIPTALENGTH 2350
-#define SCRIPTBLENGTH 700
-#define SCRIPTCLENGTH 940
-#define SCRIPTDLENGTH 900
-#define SCRIPTELENGTH 2700
-#define SCRIPTFLENGTH 1600
+#define SCRIPTALENGTH 2600 //2350
+#define SCRIPTBLENGTH 920 //700
+#define SCRIPTCLENGTH 1110 //940
+#define SCRIPTDLENGTH 960 //900
+#define SCRIPTELENGTH 2610 //2700
+#define SCRIPTFLENGTH 1930 //1600
 
 // Length to wait for response to script
 #define RESPONSEWAIT 2000
@@ -222,15 +229,12 @@ void numberToLED (uint8_t number, uint8_t led)
   //Serial.println("written");
 }
 
-
 void ledWrite (uint8_t p, uint8_t d) {
   uint8_t gpio;
   uint8_t gpioaddr, olataddr;
-
   // only 16 bits!
   if (p > 15)
     return;
-
   if (p < 8) {
     olataddr = OLLATA;
     gpioaddr = GPIOA;
@@ -239,24 +243,53 @@ void ledWrite (uint8_t p, uint8_t d) {
     gpioaddr = GPIOB;
     p -= 8;
   }
-
   // read the current GPIO output latches
   Wire.beginTransmission(portLED);
   Wire.write(olataddr);	
   Wire.endTransmission();
-  
   Wire.requestFrom(portLED, 1);
    gpio = Wire.read();
-
   // set the pin and direction
   if (d == HIGH) {
     gpio |= 1 << p; 
   } else {
     gpio &= ~(1 << p);
   }
-
   // write the new GPIO
   Wire.beginTransmission(portLED);
+  Wire.write(gpioaddr);
+  Wire.write(gpio);	
+  Wire.endTransmission();
+}
+
+void ledWriteTwo (uint8_t p, uint8_t d) {
+  uint8_t gpio;
+  uint8_t gpioaddr, olataddr;
+  // only 16 bits!
+  if (p > 15)
+    return;
+  if (p < 8) {
+    olataddr = OLLATA;
+    gpioaddr = GPIOA;
+  } else {
+    olataddr = OLLATB;
+    gpioaddr = GPIOB;
+    p -= 8;
+  }
+  // read the current GPIO output latches
+  Wire.beginTransmission(portLEDTWO);
+  Wire.write(olataddr);	
+  Wire.endTransmission();
+  Wire.requestFrom(portLEDTWO, 1);
+   gpio = Wire.read();
+  // set the pin and direction
+  if (d == HIGH) {
+    gpio |= 1 << p; 
+  } else {
+    gpio &= ~(1 << p);
+  }
+  // write the new GPIO
+  Wire.beginTransmission(portLEDTWO);
   Wire.write(gpioaddr);
   Wire.write(gpio);	
   Wire.endTransmission();
@@ -285,12 +318,44 @@ uint8_t ledRead(uint8_t p) {
   return (Wire.read() >> p) & 0x1;
 }
 
+uint8_t ledReadTwo(uint8_t p) {
+  uint8_t gpioaddr;
+
+  // only 16 bits!
+  if (p > 15)
+    return 0;
+
+  if (p < 8)
+    gpioaddr = GPIOA;
+  else {
+    gpioaddr = GPIOB;
+    p -= 8;
+  }
+
+  // read the current GPIO
+  Wire.beginTransmission(portLEDTWO);
+  Wire.write(gpioaddr);	
+  Wire.endTransmission();
+  
+  Wire.requestFrom(portLEDTWO, 1);
+  return (Wire.read() >> p) & 0x1;
+}
+
 
 // set register "reg" on expander to "data"
 // for example, IO direction
 void expanderWriteBoth (const byte reg, const byte data ) 
 {
   Wire.beginTransmission (port);
+  Wire.write (reg);
+  Wire.write (data);  // port A
+  Wire.write (data);  // port B
+  Wire.endTransmission ();
+} // end of expanderWrite
+
+void expanderWriteBothTwo (const byte reg, const byte data ) 
+{
+  Wire.beginTransmission (portTWO);
   Wire.write (reg);
   Wire.write (data);  // port A
   Wire.write (data);  // port B
@@ -306,9 +371,26 @@ void expanderWriteLED (const byte reg, const byte data )
   Wire.endTransmission ();
 } // end of expanderWrite
 
+void expanderWriteLEDTwo (const byte reg, const byte data ) 
+{
+  Wire.beginTransmission (portLEDTWO);
+  Wire.write (reg);
+  Wire.write (data);  // port A
+  Wire.write (data);  // port B
+  Wire.endTransmission ();
+} // end of expanderWrite
+
 void expanderWriteALED (const byte reg, const byte data ) 
 {
   Wire.beginTransmission (portLED);
+  Wire.write (reg);
+  Wire.write (data);  // port A
+  Wire.endTransmission ();
+} // end of expanderWrite
+
+void expanderWriteALEDTwo (const byte reg, const byte data ) 
+{
+  Wire.beginTransmission (portLEDTWO);
   Wire.write (reg);
   Wire.write (data);  // port A
   Wire.endTransmission ();
@@ -325,6 +407,17 @@ unsigned int expanderRead (const byte reg)
   return Wire.read();
 } // end of expanderRead
 
+// read a byte from the expander
+unsigned int expanderReadTwo (const byte reg) 
+{
+  Wire.beginTransmission (portTWO);
+  Wire.write (reg);
+  Wire.endTransmission ();
+  Wire.requestFrom (portTWO, 1);
+  return Wire.read();
+} // end of expanderRead
+
+
 unsigned int expanderReadLED (const byte reg) 
 {
   Wire.beginTransmission (portLED);
@@ -334,17 +427,28 @@ unsigned int expanderReadLED (const byte reg)
   return Wire.read();
 } // end of expanderRead
 
+unsigned int expanderReadLEDTwo (const byte reg) 
+{
+  Wire.beginTransmission (portLEDTWO);
+  Wire.write (reg);
+  Wire.endTransmission ();
+  Wire.requestFrom (portLEDTWO, 1);
+  return Wire.read();
+} // end of expanderRead
+
 
 // interrupt service routine, called when pin D2 goes from 1 to 0
 void keypress ()
 {
   //digitalWrite (ISR_INDICATOR, HIGH);  // debugging
   keyPressed = true;   // set flag so main loop knows
+  //Serial.println("keypress");
 }  // end of keypress
 
 void allLEDSoff ()
 {
   expanderWriteLED (GPIOA, 0x00);
+  expanderWriteLEDTwo (GPIOA, 0x00);
 }
 
 void lightKeypad ()
@@ -359,6 +463,8 @@ void lightKeypad ()
   ledWrite(EIGHTLED,HIGH);
   ledWrite(NINELED,HIGH);
   ledWrite(ZEROLED,HIGH);
+  ledWriteTwo(POUNDLED,HIGH);
+  ledWriteTwo(STARLED,HIGH);
 }
 
 void lightScript ()
@@ -423,72 +529,71 @@ void displayNumber (uint8_t b)
 {
       switch (b) {
         case ONEKEY:
-          Serial.print("1");
-          //numberToLED(1,1);
+          //Serial.print("1");
           RAS.Stop();
           RAS.PlayWAV("1.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          RAS.WaitForIdle();
+          //RAS.WaitForIdle();
           break;
         case TWOKEY:
-          Serial.print("2");
+          //Serial.print("2");
           RAS.Stop();
           RAS.PlayWAV("2.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          RAS.WaitForIdle();
+          //RAS.WaitForIdle();
           break;
         case THREEKEY:
-          Serial.print("3");
+          //Serial.print("3");
           RAS.Stop();
           RAS.PlayWAV("3.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          RAS.WaitForIdle();
+          //RAS.WaitForIdle();
           break;
         case FOURKEY:
-          Serial.print("4");
+          //Serial.print("4");
           RAS.Stop();
           RAS.PlayWAV("4.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          RAS.WaitForIdle();
+          //RAS.WaitForIdle();
           break;
         case FIVEKEY:
-          Serial.print("5");
+          //Serial.print("5");
           RAS.Stop();
           RAS.PlayWAV("5.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          RAS.WaitForIdle();
+          //RAS.WaitForIdle();
           break;
         case SIXKEY:
-          Serial.print("6");
+          //Serial.print("6");
           RAS.Stop();
           RAS.PlayWAV("6.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          RAS.WaitForIdle();
+          //RAS.WaitForIdle();
           break;
         case SEVENKEY:
-          Serial.print("7");
+          //Serial.print("7");
           RAS.Stop();
           RAS.PlayWAV("7.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          RAS.WaitForIdle();
+          //RAS.WaitForIdle();
           break;
         case EIGHTKEY:
-          Serial.print("8");
+          //Serial.print("8");
           RAS.Stop();
           RAS.PlayWAV("8.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          RAS.WaitForIdle();
+          //RAS.WaitForIdle();
           break;
         case NINEKEY: 
-          Serial.print("9");
+          //Serial.print("9");
           RAS.Stop();
           RAS.PlayWAV("9.WAV");
           delay(TONELENGTH);
@@ -496,13 +601,30 @@ void displayNumber (uint8_t b)
           RAS.WaitForIdle();
           break;
         case ZEROKEY:
-          Serial.print("0");
+          //Serial.print("0");
           RAS.Stop();
           RAS.PlayWAV("0.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          RAS.WaitForIdle();
+          //RAS.WaitForIdle();
           break;
+        case POUNDKEY:
+          //Serial.print("#");
+          RAS.Stop();
+          RAS.PlayWAV("1.WAV");
+          delay(TONELENGTH);
+          RAS.Stop();
+          //RAS.WaitForIdle();
+          break;
+        case STARKEY:
+          //Serial.print("*");
+          RAS.Stop();
+          RAS.PlayWAV("3.WAV");
+          delay(TONELENGTH);
+          RAS.Stop();
+          //RAS.WaitForIdle();
+          break;
+
         default:
           break;
       }
@@ -514,28 +636,30 @@ void setup ()
   Serial.begin (9600);  // for debugging via serial terminal on computer
 
   // expander configuration register
-  expanderWriteBoth (IOCON, 0b01100000); // mirror interrupts, disable sequential mode
- 
+  expanderWriteBoth (IOCON, 0b01100000); // mirror interrupts, disable sequential mode 
+  expanderWriteBothTwo (IOCON, 0b01100000); // mirror interrupts, disable sequential mode 
   // enable pull-up on switches
   expanderWriteBoth (GPPUA, 0xFF);   // pull-up resistor for switch - both ports
-
+  expanderWriteBothTwo (GPPUA, 0xFF);   // pull-up resistor for switch - both ports
   // invert polarity
   expanderWriteBoth (IOPOLA, 0xFF);  // invert polarity of signal - both ports
-  
+  expanderWriteBothTwo (IOPOLA, 0xFF);  // invert polarity of signal - both ports
   // enable all interrupts
   expanderWriteBoth (GPINTENA, 0xFF); // enable interrupts - both ports
-  
+  expanderWriteBothTwo (GPINTENA, 0xFF); // enable interrupts - both ports
   // no interrupt yet
   keyPressed = false;
-
   // read from interrupt capture ports to clear them
   expanderRead (INTCAPA);
+  expanderReadTwo (INTCAPA);
   expanderRead (INTCAPB);
-  
+  expanderReadTwo (INTCAPB);
   // pin 19 of MCP23017 is plugged into D2 of the Arduino which is interrupt 0
   attachInterrupt(0, keypress, FALLING);
+  attachInterrupt(1, keypress, FALLING);
   
   expanderWriteLED (IODIRA, 0x00); // Set ports A and B to output
+  expanderWriteLEDTwo (IODIRA, 0x00); // Set ports A and B to output
   
   resetTimer = millis(); // Timer that determines if the player has walked away.
   placeMarker = DIALNINE; // Start off waiting for the first nine
@@ -544,19 +668,23 @@ void setup ()
   //allLEDSoff();
   
   RAS.begin(); // Fire up the audio shield
-  RAS.InitSD();
+  //RAS.InitSD();
   delay(100);
   RAS.OutputEnable();
 
   matrix.begin(0x70);  // pass in the address of the HT16K33 for the 911 LEDs
-}  // end of setup
+  clearLED();
+  
+  wdt_enable(WDTO_8S); // Enable watchdog timer with eight second timeout.
 
+}  // end of setup
 
 // called from main loop when we know we had an interrupt
 void handleKeypress ()
 {
   resetTimer = millis();
   unsigned int keyValue = 0;
+  int secondEx = 0;
   
   delay (20);  // de-bounce before we re-enable interrupts
   
@@ -567,6 +695,16 @@ void handleKeypress ()
     keyValue |= expanderRead (INTCAPA) << 8;    // read value at time of interrupt
   if (expanderRead (INFTFB))
     keyValue |= expanderRead (INTCAPB);        // port B is in low-order byte
+  // Read port values, as required. Note that this re-arms the interrupts.
+  if (expanderReadTwo (INFTFA)) {
+    keyValue |= expanderReadTwo (INTCAPA) << 8;    // read value at time of interrupt
+    secondEx = 1;
+  }
+  if (expanderReadTwo (INFTFB)) {
+    keyValue |= expanderReadTwo (INTCAPB);      // port B is in low-order byte
+    secondEx = 1;
+  }
+
   
   // display which buttons were down at the time of the interrupt
   for (byte button = 0; button < 16; button++)
@@ -574,7 +712,12 @@ void handleKeypress ()
     // this key down?
     if (keyValue & (1 << button))
       {
-      keyBuffer = button;
+      if (secondEx) {
+        keyBuffer = button + 16;
+      } else {
+        keyBuffer = button;
+      }
+      //Serial.println(keyBuffer);
       /*switch (button) { // For debugging purposes to determine which buttons are where
         case ONEKEY:
           ledWrite(ONELED,HIGH);
@@ -634,13 +777,16 @@ void handleKeypress ()
 
 
 void loop() {
+  wdt_reset(); // Pat the watchdog
+  
   if (RESETTIME < (millis() - resetTimer)) { // Determining if kid left
-    //allLEDSoff();
     placeMarker = DIALNINE;
     lightKeypad();
     lightScript();
     clearLED();
     resetTimer = millis();
+    
+    // IMPLEMENT RESET OF IO EXPANDERS //
   }
   
   switch (placeMarker) { // This switch statement handles the dialing and response script
@@ -798,6 +944,7 @@ void loop() {
         keyBuffer = -1;
       } else if (keyBuffer != -1) {
         //displayNumber(keyBuffer);
+        readScript(keyBuffer);
         keyBuffer = -1;
       }
       break;
@@ -820,6 +967,7 @@ void loop() {
         keyBuffer = -1;
       } else if (keyBuffer != -1) {
         //displayNumber(keyBuffer);
+        readScript(keyBuffer);
         keyBuffer = -1;
       }
       break;
@@ -869,6 +1017,7 @@ void loop() {
         keyBuffer = -1;
       } else if (keyBuffer != -1) {
         //displayNumber(keyBuffer);
+        readScript(keyBuffer);
         keyBuffer = -1;
       }
       break;
@@ -940,6 +1089,7 @@ void loop() {
         keyBuffer = -1;
       } else if (keyBuffer != -1) {
         //displayNumber(keyBuffer);
+        readScript(keyBuffer);
         keyBuffer = -1;
       }
       break;
@@ -1011,6 +1161,7 @@ void loop() {
         keyBuffer = -1;
       } else if (keyBuffer != -1) {
         //displayNumber(keyBuffer);
+        readScript(keyBuffer);
         keyBuffer = -1;
       }
       break;
@@ -1082,6 +1233,7 @@ void loop() {
         keyBuffer = -1;
       } else if (keyBuffer != -1) {
         //displayNumber(keyBuffer);
+        readScript(keyBuffer);
         keyBuffer = -1;
       }
       break;
