@@ -5,7 +5,6 @@
 #include <RAS.h> // Rugged Audio Shield library
 #include "Adafruit_LEDBackpack.h" // For the HT16K33
 #include "Adafruit_GFX.h" // For the HT16K33
-#include <avr/wdt.h> // Watchdog Timer
 
 RAS RAS;
 Adafruit_LEDBackpack matrix = Adafruit_LEDBackpack();
@@ -442,7 +441,7 @@ void keypress ()
 {
   //digitalWrite (ISR_INDICATOR, HIGH);  // debugging
   keyPressed = true;   // set flag so main loop knows
-  //Serial.println("keypress");
+  Serial.println("keypress");
 }  // end of keypress
 
 void allLEDSoff ()
@@ -529,71 +528,72 @@ void displayNumber (uint8_t b)
 {
       switch (b) {
         case ONEKEY:
-          //Serial.print("1");
+          Serial.print("1");
+          //numberToLED(1,1);
           RAS.Stop();
           RAS.PlayWAV("1.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case TWOKEY:
-          //Serial.print("2");
+          Serial.print("2");
           RAS.Stop();
           RAS.PlayWAV("2.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case THREEKEY:
-          //Serial.print("3");
+          Serial.print("3");
           RAS.Stop();
           RAS.PlayWAV("3.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case FOURKEY:
-          //Serial.print("4");
+          Serial.print("4");
           RAS.Stop();
           RAS.PlayWAV("4.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case FIVEKEY:
-          //Serial.print("5");
+          Serial.print("5");
           RAS.Stop();
           RAS.PlayWAV("5.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case SIXKEY:
-          //Serial.print("6");
+          Serial.print("6");
           RAS.Stop();
           RAS.PlayWAV("6.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case SEVENKEY:
-          //Serial.print("7");
+          Serial.print("7");
           RAS.Stop();
           RAS.PlayWAV("7.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case EIGHTKEY:
-          //Serial.print("8");
+          Serial.print("8");
           RAS.Stop();
           RAS.PlayWAV("8.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case NINEKEY: 
-          //Serial.print("9");
+          Serial.print("9");
           RAS.Stop();
           RAS.PlayWAV("9.WAV");
           delay(TONELENGTH);
@@ -601,28 +601,28 @@ void displayNumber (uint8_t b)
           RAS.WaitForIdle();
           break;
         case ZEROKEY:
-          //Serial.print("0");
+          Serial.print("0");
           RAS.Stop();
           RAS.PlayWAV("0.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case POUNDKEY:
-          //Serial.print("#");
+          Serial.print("#");
           RAS.Stop();
           RAS.PlayWAV("1.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
         case STARKEY:
-          //Serial.print("*");
+          Serial.print("*");
           RAS.Stop();
           RAS.PlayWAV("3.WAV");
           delay(TONELENGTH);
           RAS.Stop();
-          //RAS.WaitForIdle();
+          RAS.WaitForIdle();
           break;
 
         default:
@@ -668,14 +668,12 @@ void setup ()
   //allLEDSoff();
   
   RAS.begin(); // Fire up the audio shield
-  //RAS.InitSD();
+  RAS.InitSD();
   delay(100);
   RAS.OutputEnable();
 
   matrix.begin(0x70);  // pass in the address of the HT16K33 for the 911 LEDs
   clearLED();
-  
-  wdt_enable(WDTO_8S); // Enable watchdog timer with eight second timeout.
 
 }  // end of setup
 
@@ -717,7 +715,7 @@ void handleKeypress ()
       } else {
         keyBuffer = button;
       }
-      //Serial.println(keyBuffer);
+      Serial.println(keyBuffer);
       /*switch (button) { // For debugging purposes to determine which buttons are where
         case ONEKEY:
           ledWrite(ONELED,HIGH);
@@ -777,16 +775,13 @@ void handleKeypress ()
 
 
 void loop() {
-  wdt_reset(); // Pat the watchdog
-  
   if (RESETTIME < (millis() - resetTimer)) { // Determining if kid left
+    //allLEDSoff();
     placeMarker = DIALNINE;
     lightKeypad();
     lightScript();
     clearLED();
     resetTimer = millis();
-    
-    // IMPLEMENT RESET OF IO EXPANDERS //
   }
   
   switch (placeMarker) { // This switch statement handles the dialing and response script
